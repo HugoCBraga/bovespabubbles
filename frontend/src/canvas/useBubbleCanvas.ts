@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import * as d3 from 'd3';
+import { zoom, zoomIdentity, select, forceCenter, extent, scaleSqrt } from 'd3';
 import { Stock } from '../types/Stock';
 import { createSimulation } from './BubbleSimulation';
 import { renderBubbles } from './BubbleRenderer';
@@ -8,7 +8,7 @@ export function useBubbleCanvas(stocks: Stock[]) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredStock, setHoveredStock] = useState<Stock | null>(null);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
-  const transformRef = useRef(d3.zoomIdentity);
+  const transformRef = useRef(zoomIdentity);
   const draggedNodeRef = useRef<Stock | null>(null);
 
   useEffect(() => {
@@ -18,13 +18,21 @@ export function useBubbleCanvas(stocks: Stock[]) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width = window.innerWidth;
-    const height = canvas.height = window.innerHeight;
+    const resizeCanvas = () => {
+      const parent = canvas.parentElement;
+      if (!parent) return { width: window.innerWidth, height: window.innerHeight };
+      const { width, height } = parent.getBoundingClientRect();
+      canvas.width = width;
+      canvas.height = height;
+      return { width, height };
+    };
+
+    const { width, height } = resizeCanvas();
 
     // Scales
     const marketCaps = stocks.map(d => d.marketCap).filter(v => v > 0);
-    const sizeScale = d3.scaleSqrt()
-      .domain(d3.extent(marketCaps) as [number, number])
+    const sizeScale = scaleSqrt()
+      .domain(extent(marketCaps) as [number, number])
       .range([10, 120]);
 
     // Add radius
@@ -66,14 +74,14 @@ export function useBubbleCanvas(stocks: Stock[]) {
     });
 
     // Zoom
-    const zoom = d3.zoom<HTMLCanvasElement, unknown>()
+    const zoomBehavior = zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.5, 5])
-      .on('zoom', (event) => {
+      .on('zoom', (event: any) => {
         transformRef.current = event.transform;
         draw();
       });
 
-    d3.select(canvas).call(zoom);
+    select(canvas).call(zoomBehavior);
 
     // Mouse events
     const handleMouseDown = (event: MouseEvent) => {
@@ -142,13 +150,21 @@ export function useBubbleCanvas(stocks: Stock[]) {
     // Restart simulation smoothly
     simulation.alpha(1).restart();
 
+    const handleResize = () => {
+      const dimensions = resizeCanvas();
+      simulation.force('center', forceCenter(dimensions.width / 2, dimensions.height / 2));
+      simulation.alpha(0.5).restart();
+    };
+
+    window.addEventListener('resize', handleResize);
+
     return () => {
       simulation.stop();
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
-    };
+      window.removeEventListener('resize', handleResize);    };
   }, [stocks, hoveredStock]);
 
   return { canvasRef, hoveredStock, mousePosition };
