@@ -12,4 +12,7 @@ export interface Stock {
   y?: number;
   fx?: number | null;
   fy?: number | null;
+  floatPhase?: number;
+  vx?: number;
+  vy?: number;
 }
