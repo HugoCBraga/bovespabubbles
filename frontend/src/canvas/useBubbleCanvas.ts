@@ -1,14 +1,52 @@
 import { useRef, useEffect, useState } from 'react';
-import { zoom, zoomIdentity, select, forceCenter, extent, scaleSqrt } from 'd3';
+import { forceCenter } from 'd3-force';
+import { extent } from 'd3-array';
+import { scaleSqrt } from 'd3-scale';
 import { Stock } from '../types/Stock';
 import { createSimulation } from './BubbleSimulation';
 import { renderBubbles } from './BubbleRenderer';
 
 export function useBubbleCanvas(stocks: Stock[]) {
+    // Damping para efeito de arremesso
+    useEffect(() => {
+      if (!stocks || stocks.length === 0) return;
+      let animationId: number;
+      const damping = 0.92; // quanto menor, mais rápido desacelera
+      const minVelocity = 2; // abaixo disso, considera "parada"
+
+      function manualDampingTick() {
+        let needsUpdate = false;
+        for (const stock of stocks) {
+          if (stock.vx && Math.abs(stock.vx) > minVelocity) {
+            stock.vx *= damping;
+            needsUpdate = true;
+          } else if (stock.vx) {
+            stock.vx = 0;
+          }
+          if (stock.vy && Math.abs(stock.vy) > minVelocity) {
+            stock.vy *= damping;
+            needsUpdate = true;
+          } else if (stock.vy) {
+            stock.vy = 0;
+          }
+        }
+        if (needsUpdate) {
+          animationId = requestAnimationFrame(manualDampingTick);
+        }
+      }
+
+      // Sempre que uma bolha for "arremessada", inicia o damping
+      // O handleMouseUp já seta vx/vy, então aqui só monitora
+      animationId = requestAnimationFrame(manualDampingTick);
+      return () => cancelAnimationFrame(animationId);
+    }, [stocks]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredStock, setHoveredStock] = useState<Stock | null>(null);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
-  const transformRef = useRef(zoomIdentity);
+  // Para efeito de arremesso
+  const lastMousePosRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const prevMousePosRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const transformRef = useRef({ x: 0, y: 0, k: 1 });
   const draggedNodeRef = useRef<Stock | null>(null);
 
   useEffect(() => {
@@ -19,7 +57,6 @@ export function useBubbleCanvas(stocks: Stock[]) {
     if (!ctx) return;
     let animationFrameId = 0;
     let isPointerDown = false;
-    let backgroundRepulse: { x: number; y: number; strength: number } | null = null;
     let previousTime = 0;
 
     const resizeCanvas = () => {
@@ -34,20 +71,20 @@ export function useBubbleCanvas(stocks: Stock[]) {
     const { width, height } = resizeCanvas();
 
     // Scales
-    const marketCaps = stocks.map(d => d.marketCap).filter(v => v > 0);
+    const marketCaps = stocks.map((d: Stock) => d.marketCap).filter((v: number) => v > 0);
     const sizeScale = scaleSqrt()
       .domain(extent(marketCaps) as [number, number])
       .range([10, 120]);
 
     // Add radius
-    stocks.forEach(stock => {
+    stocks.forEach((stock: Stock) => {
       stock.radius = sizeScale(stock.marketCap);
     });
 
     const applyFloatingMotion = (deltaSeconds: number) => {
-      const amplitude = 0.5;
-      const speed = 1.5;
-      stocks.forEach(stock => {
+      const amplitude = 0.15;
+      const speed = 0.5;
+      stocks.forEach((stock: Stock) => {
         if (stock.fx !== null && stock.fx !== undefined) return;
         if (stock.fy !== null && stock.fy !== undefined) return;
         if (stock.floatPhase === undefined) {
@@ -61,31 +98,20 @@ export function useBubbleCanvas(stocks: Stock[]) {
         if (stock.vy !== undefined) {
           stock.vy += Math.sin(phase) * amplitude;
         }
-      });
-    };
 
-    const applyBackgroundRepulse = () => {
-      if (!backgroundRepulse) return;
-      const { x, y, strength } = backgroundRepulse;
-      const falloff = 140;
-      stocks.forEach(stock => {
-        if (stock.x === undefined || stock.y === undefined) return;
-        const dx = stock.x - x;
-        const dy = stock.y - y;
-        const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 12);
-        const power = Math.max(0, 1 - distance / falloff);
-        const force = strength * power;
-        if (stock.vx !== undefined) {
-          stock.vx += (dx / distance) * force;
+        // Keep within bounds
+        const margin = stock.radius || 10;
+        if (stock.x !== undefined && stock.x < margin) {
+          if (stock.vx !== undefined) stock.vx += 0.5;
+        } else if (stock.x !== undefined && stock.x > width - margin) {
+          if (stock.vx !== undefined) stock.vx -= 0.5;
         }
-        if (stock.vy !== undefined) {
-          stock.vy += (dy / distance) * force;
+        if (stock.y !== undefined && stock.y < margin) {
+          if (stock.vy !== undefined) stock.vy += 0.5;
+        } else if (stock.y !== undefined && stock.y > height - margin) {
+          if (stock.vy !== undefined) stock.vy -= 0.5;
         }
       });
-      backgroundRepulse.strength *= 0.92;
-      if (backgroundRepulse.strength < 0.05) {
-        backgroundRepulse = null;
-      }
     };
 
     // Simulation
@@ -96,7 +122,7 @@ export function useBubbleCanvas(stocks: Stock[]) {
       const deltaSeconds = Math.min(0.05, (now - previousTime) / 1000);
       previousTime = now;
       applyFloatingMotion(deltaSeconds);
-      applyBackgroundRepulse();
+
       ctx.save();
       ctx.clearRect(0, 0, width, height);
       ctx.translate(transformRef.current.x, transformRef.current.y);
@@ -112,12 +138,20 @@ export function useBubbleCanvas(stocks: Stock[]) {
       const adjustedX = (mouseX - transformRef.current.x) / transformRef.current.k;
       const adjustedY = (mouseY - transformRef.current.y) / transformRef.current.k;
 
-      return stocks.find(stock => {
+      let closestStock: Stock | null = null;
+      let minDistance = Infinity;
+
+      stocks.forEach((stock: Stock) => {
         const dx = adjustedX - stock.x!;
         const dy = adjustedY - stock.y!;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        return distance < stock.radius;
+        if (distance < stock.radius && distance < minDistance) {
+          minDistance = distance;
+          closestStock = stock;
+        }
       });
+
+      return closestStock;
     };
 
     const setDraggedNodePosition = (node: Stock, mouseX: number, mouseY: number) => {
@@ -126,77 +160,97 @@ export function useBubbleCanvas(stocks: Stock[]) {
       const dx = adjustedX - (node.x ?? adjustedX);
       const dy = adjustedY - (node.y ?? adjustedY);
       const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-      const pull = Math.min(1.0, distance * 0.02);
+      const pull = Math.min(0.2, distance * 0.003);
       node.fx = (node.x ?? adjustedX) + dx * pull;
       node.fy = (node.y ?? adjustedY) + dy * pull;
+      // Não zera vx/vy durante o drag
     };
 
     // Initialize positions
-    stocks.forEach(stock => {
-      if (stock.x === undefined) stock.x = Math.random() * width;
-      if (stock.y === undefined) stock.y = Math.random() * height;
+    stocks.forEach((stock: Stock, i: number) => {
+      const margin = stock.radius || 10;
+      const randX = Math.random() * (width - 2 * margin) + margin;
+      const randY = Math.random() * (height - 2 * margin) + margin;
+      stock.x = randX;
+      stock.y = randY;
     });
-
-    // Zoom
-    const zoomBehavior = zoom<HTMLCanvasElement, unknown>()
-      .scaleExtent([0.5, 5])
-      .on('zoom', (event: any) => {
-        transformRef.current = event.transform;
-        draw();
-      });
-
-    select(canvas).call(zoomBehavior);
 
     // Mouse events
     const handleMouseDown = (event: MouseEvent) => {
       isPointerDown = true;
       const rect = canvas.getBoundingClientRect();
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (event.clientX - rect.left) * scaleX;
+      const mouseY = (event.clientY - rect.top) * scaleY;
 
       const node = findNodeUnderMouse(mouseX, mouseY);
       if (node) {
         draggedNodeRef.current = node;
         setDraggedNodePosition(node, mouseX, mouseY);
-        simulation.alphaTarget(0.45).restart();
-      } else {
-        const adjustedX = (mouseX - transformRef.current.x) / transformRef.current.k;
-        const adjustedY = (mouseY - transformRef.current.y) / transformRef.current.k;
-        backgroundRepulse = { x: adjustedX, y: adjustedY, strength: 2.8 };
-        simulation.alphaTarget(0.2).restart();
+        simulation.alphaTarget(0.1).restart();
       }
     };
 
     const handleMouseMove = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (event.clientX - rect.left) * scaleX;
+      const mouseY = (event.clientY - rect.top) * scaleY;
 
-      setMousePosition({ x: event.clientX, y: event.clientY });
+      setMousePosition({ x: mouseX, y: mouseY });
+      prevMousePosRef.current = lastMousePosRef.current;
+      lastMousePosRef.current = { x: mouseX, y: mouseY, t: performance.now() };
+
+      const found = findNodeUnderMouse(mouseX, mouseY);
+      setHoveredStock(found || null);
 
       if (draggedNodeRef.current) {
         setDraggedNodePosition(draggedNodeRef.current, mouseX, mouseY);
-        simulation.alpha(0.5).restart();
-      } else {
-        // Normal hover detection
-        const found = findNodeUnderMouse(mouseX, mouseY);
-        setHoveredStock(found || null);
-        if (isPointerDown) {
-          const adjustedX = (mouseX - transformRef.current.x) / transformRef.current.k;
-          const adjustedY = (mouseY - transformRef.current.y) / transformRef.current.k;
-          backgroundRepulse = { x: adjustedX, y: adjustedY, strength: 2.5 };
-          simulation.alphaTarget(0.2).restart();
-        }
+        simulation.alpha(0.1).restart();
       }
     };
 
     const handleMouseUp = () => {
       isPointerDown = false;
       if (draggedNodeRef.current) {
-        draggedNodeRef.current.fx = null;
-        draggedNodeRef.current.fy = null;
+        const node = draggedNodeRef.current;
+        const last = lastMousePosRef.current;
+        const prev = prevMousePosRef.current;
+        node.fx = null;
+        node.fy = null;
+        if (last && prev) {
+          // Usa dt real, mas limita mínimo e máximo para evitar bugs
+          let dt = (last.t - prev.t) / 1000;
+          if (!isFinite(dt) || dt <= 0) dt = 0.016;
+          dt = Math.max(0.016, Math.min(dt, 0.12)); // entre 16ms e 120ms
+          // Calcula velocidade baseada no movimento real do mouse
+          let vx = (last.x - prev.x) / dt;
+          let vy = (last.y - prev.y) / dt;
+          // Limita velocidade máxima para evitar "arremessos" exagerados
+          const maxV = 350;
+          const minV = -350;
+          vx = Math.max(Math.min(vx, maxV), minV);
+          vy = Math.max(Math.min(vy, maxV), minV);
+          // Aplica um fator de suavização
+          const throwFactor = 0.22; // menor = mais suave
+          node.vx = vx * throwFactor;
+          node.vy = vy * throwFactor;
+        }
         draggedNodeRef.current = null;
-        simulation.alphaTarget(0.08);
+        simulation.alphaTarget(0.4);
+        let alphaDecay = 0.4;
+        const decayStep = 0.01;
+        const decayInterval = setInterval(() => {
+          alphaDecay -= decayStep;
+          if (alphaDecay <= 0.02) {
+            simulation.alphaTarget(0.02);
+            clearInterval(decayInterval);
+          } else {
+            simulation.alphaTarget(alphaDecay);
+          }
+        }, 70);
       }
     };
 
@@ -208,7 +262,7 @@ export function useBubbleCanvas(stocks: Stock[]) {
         draggedNodeRef.current.fx = null;
         draggedNodeRef.current.fy = null;
         draggedNodeRef.current = null;
-        simulation.alphaTarget(0.08);
+        simulation.alphaTarget(0.02);
       }
     };
 
@@ -217,11 +271,8 @@ export function useBubbleCanvas(stocks: Stock[]) {
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseLeave);
 
-    // Initial draw
     draw();
-
-    // Restart simulation smoothly
-    simulation.alpha(1).restart();
+    simulation.alpha(0.5).restart();
 
     const animate = () => {
       draw();
@@ -246,7 +297,11 @@ export function useBubbleCanvas(stocks: Stock[]) {
       canvas.removeEventListener('mouseleave', handleMouseLeave);
       window.removeEventListener('resize', handleResize);
     };
-  }, [stocks, hoveredStock]);
+  }, [stocks]);
+  // Loga informações sempre que hoveredStock mudar (quando o cursor vira pointer)
+  useEffect(() => {
+    // ...
+  }, [hoveredStock, mousePosition]);
 
-  return { canvasRef, hoveredStock, mousePosition };
+  return { canvasRef, hoveredStock, mousePosition, cursor: hoveredStock ? 'pointer' : 'default' };
 }

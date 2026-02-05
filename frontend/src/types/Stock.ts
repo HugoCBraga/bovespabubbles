@@ -15,4 +15,5 @@ export interface Stock {
   floatPhase?: number;
   vx?: number;
   vy?: number;
+  logourl?: string;
 }

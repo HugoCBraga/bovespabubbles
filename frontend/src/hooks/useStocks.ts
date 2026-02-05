@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Stock } from '../types/Stock';
 import { fetchStocks } from '../api/stocks';
 
-export function useStocks() {
+export function useStocks(manual?: boolean) {
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,9 +22,11 @@ export function useStocks() {
     };
 
     loadStocks();
-    const interval = setInterval(loadStocks, 60000);
-    return () => clearInterval(interval);
-  }, []);
+    if (!manual) {
+      const interval = setInterval(loadStocks, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [manual]);
 
-  return { stocks, loading, error };
+  return { stocks, loading, error, setStocks, setLoading, setError };
 }

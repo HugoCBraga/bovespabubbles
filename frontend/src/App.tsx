@@ -1,12 +1,55 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { useStocks } from './hooks/useStocks';
+import { fetchStocks } from './api/stocks';
 import { useBubbleCanvas } from './canvas/useBubbleCanvas';
 import { Tooltip } from './components/Tooltip';
 import './App.css';
 
 const App: React.FC = () => {
-  const { stocks, loading, error } = useStocks();
-  const { canvasRef, hoveredStock, mousePosition } = useBubbleCanvas(stocks);
+
+  const { stocks, loading, error, setStocks, setLoading, setError } = useStocks(true);
+  const { canvasRef, hoveredStock, mousePosition, cursor } = useBubbleCanvas(stocks);
+
+  const [refreshDisabled, setRefreshDisabled] = useState(true);
+  const [refreshCountdown, setRefreshCountdown] = useState(60);
+  const [showRefreshTooltip, setShowRefreshTooltip] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Habilita o botão após 1 minuto
+  React.useEffect(() => {
+    setRefreshDisabled(true);
+    setRefreshCountdown(60);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    timerRef.current = setTimeout(() => setRefreshDisabled(false), 60000);
+    intervalRef.current = setInterval(() => {
+      setRefreshCountdown(prev => prev > 0 ? prev - 1 : 0);
+    }, 1000);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  const handleRefresh = async () => {
+    setRefreshDisabled(true);
+    setRefreshCountdown(60);
+    setLoading(true);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    timerRef.current = setTimeout(() => setRefreshDisabled(false), 60000);
+    intervalRef.current = setInterval(() => {
+      setRefreshCountdown(prev => prev > 0 ? prev - 1 : 0);
+    }, 1000);
+    try {
+      const data = await fetchStocks();
+      setStocks(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) return <div className="status">Carregando...</div>;
   if (error) return <div className="status status--error">Erro: {error}</div>;
@@ -36,6 +79,43 @@ const App: React.FC = () => {
             <button className="chip">YTD</button>
           </div>
           <div className="topbar__right">
+            <div
+              style={{ position: 'relative', display: 'inline-block', marginRight: 8 }}
+              onMouseEnter={() => {
+                if (refreshDisabled) setShowRefreshTooltip(true);
+              }}
+              onMouseLeave={() => {
+                setShowRefreshTooltip(false);
+              }}
+            >
+              <button
+                className="pill pill--icon"
+                onClick={handleRefresh}
+                disabled={refreshDisabled}
+                style={{ opacity: refreshDisabled ? 0.5 : 1, cursor: refreshDisabled ? 'not-allowed' : 'pointer' }}
+              >
+                <span role="img" aria-label="Atualizar">🔄</span>
+              </button>
+              {/* Tooltip renderizado apenas quando necessário */}
+              {refreshDisabled && showRefreshTooltip && (
+                <div style={{
+                  position: 'absolute',
+                  top: '110%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: '#222',
+                  color: '#fff',
+                  padding: '7px 14px',
+                  borderRadius: 6,
+                  fontSize: 14,
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                  zIndex: 10
+                }}>
+                  {`Aguarde ${refreshCountdown} segundo${refreshCountdown === 1 ? '' : 's'} para atualizar novamente.`}
+                </div>
+              )}
+            </div>
             <button className="pill">R$ BRL</button>
             <button className="pill pill--ghost">Market Cap</button>
             <button className="pill pill--ghost">Configurar</button>
@@ -57,7 +137,11 @@ const App: React.FC = () => {
         </div>
       </header>
       <main className="canvas-wrapper">
-        <canvas ref={canvasRef} className="bubble-canvas" />
+        <canvas
+          ref={canvasRef}
+          className="bubble-canvas"
+          style={{ cursor: cursor || 'default' }}
+        />
       </main>
       <Tooltip stock={hoveredStock} mousePosition={mousePosition} />
     </div>

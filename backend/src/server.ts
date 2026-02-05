@@ -1,4 +1,6 @@
+
 import Fastify from 'fastify';
+
 
 const fastify = Fastify({ logger: true });
 
@@ -21,19 +23,31 @@ const CACHE_TTL = 60 * 1000; // 60 seconds
 const tickers = ['PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'BBDC4.SA', 'WEGE3.SA', 'MGLU3.SA', 'ABEV3.SA', 'PETR3.SA', 'ITSA4.SA', 'JBSS3.SA'];
 
 async function fetchStockData(): Promise<StockData[]> {
-  // Mock data for testing
-  const data = [
-    { symbol: 'PETR4', name: 'Petrobras', price: 25.0, changePercent: 1.5, volume: 1000000, marketCap: 500000000 },
-    { symbol: 'VALE3', name: 'Vale', price: 60.0, changePercent: -0.8, volume: 2000000, marketCap: 300000000 },
-    { symbol: 'ITUB4', name: 'Itaú', price: 30.0, changePercent: 0.5, volume: 1500000, marketCap: 200000000 },
-    { symbol: 'BBDC4', name: 'Bradesco', price: 15.0, changePercent: -1.2, volume: 800000, marketCap: 150000000 },
-    { symbol: 'WEGE3', name: 'Weg', price: 40.0, changePercent: 2.0, volume: 500000, marketCap: 100000000 },
-  ];
-  return data.map(stock => ({
-    ...stock,
-    absChange: Math.abs(stock.changePercent),
-    isPositive: stock.changePercent >= 0,
-  }));
+  // Busca dados reais do Yahoo Finance
+  const results: StockData[] = [];
+  try {
+    // Usa require dinâmico para compatibilidade com CommonJS/TypeScript
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const yahooFinance = require('yahoo-finance2').default;
+    const quotes = await yahooFinance.quote(tickers) as any[];
+    for (const q of Array.isArray(quotes) ? quotes : [quotes]) {
+      if (!q) continue;
+      results.push({
+        symbol: (q.symbol || '').replace('.SA', ''),
+        name: q.shortName || q.longName || q.symbol || '',
+        price: q.regularMarketPrice ?? 0,
+        changePercent: q.regularMarketChangePercent ?? 0,
+        volume: q.regularMarketVolume ?? 0,
+        marketCap: q.marketCap ?? 0,
+        absChange: Math.abs(q.regularMarketChangePercent ?? 0),
+        isPositive: (q.regularMarketChangePercent ?? 0) >= 0,
+      });
+    }
+    return results;
+  } catch (err) {
+    console.error('[fetchStockData] Erro ao buscar dados do Yahoo Finance:', err);
+    return [];
+  }
 }
 
 fastify.get('/stocks', async (request, reply) => {
