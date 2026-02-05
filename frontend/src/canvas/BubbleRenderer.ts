@@ -4,17 +4,23 @@ export function renderBubbles(
   ctx: CanvasRenderingContext2D,
   stocks: Stock[],
   hoveredStock: Stock | null,
-  draggedStock: Stock | null
+  draggedStock: Stock | null,
+  period: '1D'|'1W'|'1M'|'1Y'|'MARKETCAP' = '1D'
 ) {
   stocks.forEach(stock => {
-    const radius = stock.radius;
+    // ...
+    const radius = stock.radius ?? 10;
     const isHovered = hoveredStock === stock;
     const isDragged = draggedStock === stock;
+    // Variação do período selecionado
+    const change = period === 'MARKETCAP' ? 0 : (stock.variation ?? 0);
+    const isPositive = change >= 0;
 
     // Efeito de brilho para dragged
     if (isDragged) {
       ctx.save();
-      ctx.shadowColor = stock.isPositive ? '#52c41a' : '#ff4d4f';
+      const periodChange = period === 'MARKETCAP' ? 0 : (stock.variations?.[period] ?? 0);
+      ctx.shadowColor = periodChange >= 0 ? '#52c41a' : '#ff4d4f';
       ctx.shadowBlur = 20;
       ctx.globalAlpha = 0.8;
     }
@@ -23,9 +29,10 @@ export function renderBubbles(
     ctx.save();
     ctx.beginPath();
     ctx.arc(stock.x!, stock.y!, isHovered || isDragged ? radius * 1.2 : radius, 0, 2 * Math.PI);
-    ctx.shadowColor = stock.isPositive ? '#00ff6a' : '#ff2a2a';
+
+    ctx.shadowColor = isPositive ? '#00ff6a' : '#ff2a2a';
     ctx.shadowBlur = radius * 0.45;
-    ctx.fillStyle = stock.isPositive ? '#1a2e1a' : '#2e1a1a';
+    ctx.fillStyle = isPositive ? '#1a2e1a' : '#2e1a1a';
     ctx.fill();
     ctx.restore();
 
@@ -33,7 +40,7 @@ export function renderBubbles(
     ctx.save();
     ctx.beginPath();
     ctx.arc(stock.x!, stock.y!, isHovered || isDragged ? radius * 1.2 : radius - 2, 0, 2 * Math.PI);
-    ctx.strokeStyle = stock.isPositive ? '#00ff6a' : '#ff2a2a';
+    ctx.strokeStyle = isPositive ? '#00ff6a' : '#ff2a2a';
     ctx.lineWidth = isHovered || isDragged ? 5 : 3;
     ctx.stroke();
     ctx.restore();
@@ -48,18 +55,18 @@ export function renderBubbles(
       img.src = stock.logourl;
       // O drawImage só funciona após o load, então precisamos garantir que a imagem já está carregada
       if (img.complete) {
-        drawBubbleContent(ctx, stock, radius, img);
+        drawBubbleContent(ctx, stock, radius, change, img);
       } else {
         img.onload = () => {
-          drawBubbleContent(ctx, stock, radius, img);
+          drawBubbleContent(ctx, stock, radius, change, img);
         };
       }
     } else {
-      drawBubbleContent(ctx, stock, radius, undefined);
+      drawBubbleContent(ctx, stock, radius, change, undefined);
     }
   });
 
-  function drawBubbleContent(ctx: CanvasRenderingContext2D, stock: Stock, radius: number, img?: HTMLImageElement) {
+  function drawBubbleContent(ctx: CanvasRenderingContext2D, stock: Stock, radius: number, change: number, img?: HTMLImageElement) {
     // Pequena: só imagem
     if (radius < 32) {
       if (img) {
@@ -85,9 +92,9 @@ export function renderBubbles(
         ctx.restore();
       }
       ctx.font = 'bold 12px Arial';
-      ctx.fillStyle = stock.isPositive ? '#fff' : '#fff';
+      ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
-      ctx.fillText(`${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%`, stock.x!, stock.y! + radius * 0.45);
+      ctx.fillText(`${change >= 0 ? '+' : ''}${change?.toFixed(2) ?? '--'}%`, stock.x!, stock.y! + radius * 0.45);
       return;
     }
     // Grande: imagem em cima, nome no meio, % embaixo
@@ -105,7 +112,7 @@ export function renderBubbles(
     ctx.textAlign = 'center';
     ctx.fillText(stock.symbol, stock.x!, stock.y! + 2);
     ctx.font = 'bold 13px Arial';
-    ctx.fillStyle = stock.isPositive ? '#fff' : '#fff';
-    ctx.fillText(`${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%`, stock.x!, stock.y! + radius * 0.55);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${change >= 0 ? '+' : ''}${change?.toFixed(2) ?? '--'}%`, stock.x!, stock.y! + radius * 0.55);
   }
 }

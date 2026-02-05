@@ -80,18 +80,25 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .brand__logo {
-  width: 40px;
-  height: 40px;
+  width: 128px;
+  height: 128px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #1f7aff, #5fd4ff);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  color: #0b1020;
+  object-fit: contain;
+  background: none;
+  display: block;
+  margin: 0;
+}
+.brand__logo {
+  width: 128px;
+  height: 128px;
+  border-radius: 12px;
+  object-fit: contain;
+  background: none;
+  display: block;
 }
 
 .brand__title {

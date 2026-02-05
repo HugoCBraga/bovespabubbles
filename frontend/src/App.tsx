@@ -7,8 +7,9 @@ import './App.css';
 
 const App: React.FC = () => {
 
-  const { stocks, loading, error, setStocks, setLoading, setError } = useStocks(true);
-  const { canvasRef, hoveredStock, mousePosition, cursor } = useBubbleCanvas(stocks);
+  const [period, setPeriod] = useState<'1D'|'1W'|'1M'|'1Y'|'MARKETCAP'>('1D');
+  const { stocks, loading, error, setStocks, setLoading, setError } = useStocks(period, true);
+  const { canvasRef, hoveredStock, mousePosition, cursor } = useBubbleCanvas(stocks, period);
 
   const [refreshDisabled, setRefreshDisabled] = useState(true);
   const [refreshCountdown, setRefreshCountdown] = useState(60);
@@ -41,7 +42,7 @@ const App: React.FC = () => {
       setRefreshCountdown(prev => prev > 0 ? prev - 1 : 0);
     }, 1000);
     try {
-      const data = await fetchStocks();
+      const data = await fetchStocks(period);
       setStocks(data);
       setError(null);
     } catch (err) {
@@ -50,6 +51,8 @@ const App: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Removido useEffect duplicado de fetchStocks. O hook useStocks já faz o fetch inicial.
 
   if (loading) return <div className="status">Carregando...</div>;
   if (error) return <div className="status status--error">Erro: {error}</div>;
@@ -60,7 +63,7 @@ const App: React.FC = () => {
         <div className="topbar__row">
           <div className="topbar__left">
             <div className="brand">
-              <div className="brand__logo">B3</div>
+              <img src="/b3-logo.png" alt="B3 Logo" className="brand__logo" style={{height: 128, width: 128, objectFit: 'contain'}} onError={() => {console.log('Erro ao carregar logo')}} onLoad={() => {console.log('Logo carregado')}} />
               <div>
                 <div className="brand__title">Bovespa Bubbles</div>
                 <div className="brand__subtitle">Bolsa Brasileira em tempo real</div>
@@ -72,11 +75,21 @@ const App: React.FC = () => {
             </label>
           </div>
           <div className="topbar__center">
-            <button className="chip chip--active">24H</button>
-            <button className="chip">7D</button>
-            <button className="chip">30D</button>
-            <button className="chip">1A</button>
-            <button className="chip">YTD</button>
+            {[
+              { label: 'Dia', value: '1D' },
+              { label: 'Semana', value: '1W' },
+              { label: 'Mês', value: '1M' },
+              { label: 'Ano', value: '1Y' },
+              { label: 'Cap de Mercado', value: 'MARKETCAP' },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                className={`chip${period === opt.value ? ' chip--active' : ''}`}
+                onClick={() => setPeriod(opt.value as any)}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
           <div className="topbar__right">
             <div
@@ -143,7 +156,7 @@ const App: React.FC = () => {
           style={{ cursor: cursor || 'default' }}
         />
       </main>
-      <Tooltip stock={hoveredStock} mousePosition={mousePosition} />
+      <Tooltip stock={hoveredStock} mousePosition={mousePosition} period={period} />
     </div>
   );
 };

@@ -2,12 +2,17 @@ export interface Stock {
   symbol: string;
   name: string;
   price: number;
-  changePercent: number;
   volume: number;
   marketCap: number;
-  absChange: number;
-  isPositive: boolean;
-  radius: number;
+  logourl?: string;
+  variation?: number | null; // novo campo retornado pela API
+  variations?: {
+    '1D': number | null;
+    '1W': number | null;
+    '1M': number | null;
+    '1Y': number | null;
+  };
+  radius?: number;
   x?: number;
   y?: number;
   fx?: number | null;
@@ -15,5 +20,6 @@ export interface Stock {
   floatPhase?: number;
   vx?: number;
   vy?: number;
-  logourl?: string;
+  regularMarketOpen?: number | null;
+  regularMarketTime?: string | null;
 }

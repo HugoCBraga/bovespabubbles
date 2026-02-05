@@ -15,7 +15,7 @@ export function createSimulation(
   const simulation = forceSimulation(nodes)
     .force('charge', forceManyBody().strength(6))
     .force('center', forceCenter(width / 2, height / 2).strength(0))
-    .force('collision', forceCollide<Stock>(d => d.radius + 2).iterations(2))
+    .force('collision', forceCollide<Stock>(d => (d.radius ?? 10) + 2).iterations(2))
     .force('x', forceX(width / 2).strength(0))
     .force('y', forceY(height / 2).strength(0))
     .alphaTarget(0.02)

@@ -1,0 +1,11 @@
+NÃO há importação de dotenv/config no seu backend.
+
+Sem isso, process.env.BRAPI_TOKEN pode não ser carregado ao rodar com npx tsx src/server.mts.
+
+Adicione no topo de src/server.mts:
+
+import 'dotenv/config';
+
+Ou rode o backend assim:
+
+npx tsx -r dotenv/config src/server.mts

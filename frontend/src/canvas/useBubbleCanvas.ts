@@ -6,7 +6,7 @@ import { Stock } from '../types/Stock';
 import { createSimulation } from './BubbleSimulation';
 import { renderBubbles } from './BubbleRenderer';
 
-export function useBubbleCanvas(stocks: Stock[]) {
+export function useBubbleCanvas(stocks: Stock[], period: '1D'|'1W'|'1M'|'1Y'|'MARKETCAP' = '1D') {
     // Damping para efeito de arremesso
     useEffect(() => {
       if (!stocks || stocks.length === 0) return;
@@ -59,6 +59,17 @@ export function useBubbleCanvas(stocks: Stock[]) {
     let isPointerDown = false;
     let previousTime = 0;
 
+    // Redesenha imediatamente ao trocar o período
+    const redraw = () => {
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.translate(transformRef.current.x, transformRef.current.y);
+      ctx.scale(transformRef.current.k, transformRef.current.k);
+      renderBubbles(ctx, stocks, hoveredStock, draggedNodeRef.current, period);
+      ctx.restore();
+    };
+    redraw();
+
     const resizeCanvas = () => {
       const parent = canvas.parentElement;
       if (!parent) return { width: window.innerWidth, height: window.innerHeight };
@@ -70,16 +81,34 @@ export function useBubbleCanvas(stocks: Stock[]) {
 
     const { width, height } = resizeCanvas();
 
-    // Scales
+    // Responsividade: range do raio depende do tamanho do canvas
+    const minSide = Math.min(width, height);
+    // Exemplo: bolhas menores em telas pequenas, maiores em telas grandes
+    let minR = Math.max(6, minSide * 0.018); // ~1.8% do menor lado
+    let maxR = Math.max(24, minSide * 0.13); // ~13% do menor lado
+    // Limita máximo para não explodir em telas gigantes
+    maxR = Math.min(maxR, 140);
     const marketCaps = stocks.map((d: Stock) => d.marketCap).filter((v: number) => v > 0);
-    const sizeScale = scaleSqrt()
-      .domain(extent(marketCaps) as [number, number])
-      .range([10, 120]);
-
-    // Add radius
-    stocks.forEach((stock: Stock) => {
-      stock.radius = sizeScale(stock.marketCap);
-    });
+    let sizeScale: (v: number) => number;
+    if (period === 'MARKETCAP') {
+      sizeScale = scaleSqrt()
+        .domain(extent(marketCaps) as [number, number])
+        .range([minR, maxR]);
+      stocks.forEach((stock: Stock) => {
+        stock.radius = sizeScale(stock.marketCap);
+      });
+    } else {
+      // Para períodos, escala pelo valor absoluto da variação, mas usa a mesma faixa de raio do marketCap
+      const variationsAbs = stocks.map((d: Stock) => Math.abs(d.variations?.[period] ?? 0));
+      // Usa a mesma faixa de raio, mas o domínio é das variações
+      sizeScale = scaleSqrt()
+        .domain(extent(variationsAbs) as [number, number])
+        .range([minR, maxR]);
+      stocks.forEach((stock: Stock) => {
+        const variation = Math.abs(stock.variations?.[period] ?? 0);
+        stock.radius = sizeScale(variation);
+      });
+    }
 
     const applyFloatingMotion = (deltaSeconds: number) => {
       const amplitude = 0.15;
@@ -127,11 +156,24 @@ export function useBubbleCanvas(stocks: Stock[]) {
       ctx.clearRect(0, 0, width, height);
       ctx.translate(transformRef.current.x, transformRef.current.y);
       ctx.scale(transformRef.current.k, transformRef.current.k);
-      renderBubbles(ctx, stocks, hoveredStock, draggedNodeRef.current);
+      renderBubbles(ctx, stocks, hoveredStock, draggedNodeRef.current, period);
       ctx.restore();
     };
 
     simulation.on('tick', draw);
+    // Clamp pós-tick: impede que qualquer bolha ultrapasse os limites do canvas
+    const HEADER_OFFSET = 140; // altura do cabeçalho em px (ajuste se necessário)
+    simulation.on('tick', () => {
+      stocks.forEach(stock => {
+        const margin = stock.radius || 10;
+        const minX = margin;
+        const maxX = width - margin;
+        const minY = margin + HEADER_OFFSET;
+        const maxY = height - margin;
+        if (stock.x !== undefined) stock.x = Math.max(minX, Math.min(stock.x, maxX));
+        if (stock.y !== undefined) stock.y = Math.max(minY, Math.min(stock.y, maxY));
+      });
+    });
 
     // Helper function to find node under mouse
     const findNodeUnderMouse = (mouseX: number, mouseY: number) => {
@@ -145,7 +187,8 @@ export function useBubbleCanvas(stocks: Stock[]) {
         const dx = adjustedX - stock.x!;
         const dy = adjustedY - stock.y!;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance < stock.radius && distance < minDistance) {
+        const radius = stock.radius ?? 10;
+        if (distance < radius && distance < minDistance) {
           minDistance = distance;
           closestStock = stock;
         }
@@ -161,18 +204,34 @@ export function useBubbleCanvas(stocks: Stock[]) {
       const dy = adjustedY - (node.y ?? adjustedY);
       const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
       const pull = Math.min(0.2, distance * 0.003);
-      node.fx = (node.x ?? adjustedX) + dx * pull;
-      node.fy = (node.y ?? adjustedY) + dy * pull;
+      let fx = (node.x ?? adjustedX) + dx * pull;
+      let fy = (node.y ?? adjustedY) + dy * pull;
+      // Clamp para manter a bolha inteira dentro do canvas
+      const margin = node.radius || 10;
+      const HEADER_OFFSET = 140; // altura do cabeçalho em px (ajuste se necessário)
+      const minX = margin;
+      const maxX = width - margin;
+      const minY = margin + HEADER_OFFSET;
+      const maxY = height - margin;
+      fx = Math.max(minX, Math.min(fx, maxX));
+      fy = Math.max(minY, Math.min(fy, maxY));
+      node.fx = fx;
+      node.fy = fy;
       // Não zera vx/vy durante o drag
     };
 
     // Initialize positions
     stocks.forEach((stock: Stock, i: number) => {
       const margin = stock.radius || 10;
-      const randX = Math.random() * (width - 2 * margin) + margin;
-      const randY = Math.random() * (height - 2 * margin) + margin;
-      stock.x = randX;
-      stock.y = randY;
+      const HEADER_OFFSET = 140; // altura do cabeçalho em px (ajuste se necessário)
+      const minX = margin;
+      const maxX = width - margin;
+      const minY = margin + HEADER_OFFSET;
+      const maxY = height - margin;
+      const randX = Math.random() * (maxX - minX) + minX;
+      const randY = Math.random() * (maxY - minY) + minY;
+      stock.x = Math.max(minX, Math.min(randX, maxX));
+      stock.y = Math.max(minY, Math.min(randY, maxY));
     });
 
     // Mouse events
@@ -297,7 +356,7 @@ export function useBubbleCanvas(stocks: Stock[]) {
       canvas.removeEventListener('mouseleave', handleMouseLeave);
       window.removeEventListener('resize', handleResize);
     };
-  }, [stocks]);
+  }, [stocks, period]);
   // Loga informações sempre que hoveredStock mudar (quando o cursor vira pointer)
   useEffect(() => {
     // ...
