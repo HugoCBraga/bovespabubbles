@@ -20,7 +20,7 @@ let cache: StockData[] | null = null;
 let cacheTime: number = 0;
 const CACHE_TTL = 60 * 1000; // 60 seconds
 
-const BRAPI_TOKEN = '987eHpW6FghLqirmFAgBcv';
+const BRAPI_TOKEN = process.env.BRAPI_TOKEN || '';
 
 // Função para buscar todos os tickers disponíveis na B3
 async function fetchAllTickers(): Promise<string[]> {
