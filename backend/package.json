@@ -5,15 +5,16 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts"
+    "dev": "tsx src/server.mts"
   },
   "dependencies": {
     "@fastify/cors": "^8.0.0",
     "fastify": "^4.0.0",
-    "yahoo-finance2": "^2.0.0"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
+    "@types/node-fetch": "^2.6.13",
     "ts-node": "^10.0.0",
     "typescript": "^5.0.0"
   }
